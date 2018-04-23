@@ -174,23 +174,23 @@ namespace NuClear.Broadway.Worker
 
         private static int Run(CommandLineApplication app, ILogger logger, IClusterClient clusterClient, GrainCancellationTokenSource cts)
         {
-            var registry = new WorkerRegistry(logger, clusterClient);
+            var registry = new WorkerGrainRegistry(logger, clusterClient);
 
             var taskId = app.Parent.Name;
-            var tasType = app.Name;
-            var worker = registry.GetWorker(taskId, tasType);
+            var taskType = app.Name;
+            var workerGrain = registry.GetWorkerGrain(taskId, taskType);
 
             logger.LogInformation(
                 "Starting worker of type {workerType} with identity {workerIndentity}...",
-                worker.GetType().Name,
-                worker.GetGrainIdentity());
+                workerGrain.GetType().Name,
+                workerGrain.GetGrainIdentity());
             
-            worker.Execute(cts.Token).GetAwaiter().GetResult();
+            workerGrain.Execute(cts.Token).GetAwaiter().GetResult();
             
             logger.LogInformation(
                 "Worker of type {workerType} with identity {workerIndentity} completed successfully.", 
-                worker.GetType().Name,
-                worker.GetGrainIdentity());
+                workerGrain.GetType().Name,
+                workerGrain.GetGrainIdentity());
 
             return 0;
         }

@@ -7,7 +7,7 @@ using Orleans;
 
 namespace NuClear.Broadway.Worker
 {
-    public class WorkerRegistry
+    public class WorkerGrainRegistry
     {
         private static readonly Dictionary<string, Type> Registry =
             new Dictionary<string, Type>
@@ -16,30 +16,30 @@ namespace NuClear.Broadway.Worker
             };
 
         private static readonly MethodInfo GetGrainMethodInfo =
-            typeof(WorkerRegistry).GetMethod(nameof(GetGrain), BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(WorkerGrainRegistry).GetMethod(nameof(GetGrain), BindingFlags.Instance | BindingFlags.NonPublic);
         
         private readonly ILogger _logger;
         private readonly IClusterClient _clusterClient;
 
-        public WorkerRegistry(ILogger logger, IClusterClient clusterClient)
+        public WorkerGrainRegistry(ILogger logger, IClusterClient clusterClient)
         {
             _logger = logger;
             _clusterClient = clusterClient;
         }
 
-        public IWorkerGrain GetWorker(string taskId, string taskType)
+        public IWorkerGrain GetWorkerGrain(string taskId, string taskType)
         {
             if (Registry.TryGetValue($"{taskId}-{taskType}", out var workerType))
             {
                 var getGrainMethod = GetGrainMethodInfo.MakeGenericMethod(workerType);
-                return (IWorkerGrain) getGrainMethod.Invoke(this, Array.Empty<object>());
+                return (IWorkerGrain) getGrainMethod.Invoke(this, null);
             }
             
             _logger.LogCritical("Worker for task {taskId} of type {taskType} has not beed registered.", taskId, taskType);
             throw new WorkerNotFoundExeption(taskId, taskType);
         }
 
-        private TGrainInterface GetGrain<TGrainInterface>() where TGrainInterface : IGrainWithIntegerKey
-            => _clusterClient.GetGrain<TGrainInterface>(0);
+        private TWorkerGrain GetGrain<TWorkerGrain>() where TWorkerGrain : IWorkerGrain
+            => _clusterClient.GetGrain<TWorkerGrain>(0);
     }
 }
