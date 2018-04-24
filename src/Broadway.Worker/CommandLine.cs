@@ -14,6 +14,7 @@
         public struct CommandTypes
         {
             public const string Firms = "firms";
+            public const string FlowKaleidoscope = "flow-kaleidoscope";
         }
 
         public struct Arguments

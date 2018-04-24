@@ -46,6 +46,7 @@ namespace NuClear.Broadway.Worker
 
                 eventArgs.Cancel = true;
             };
+            
             var app = new CommandLineApplication { Name = "Broadway.Worker" };
             app.HelpOption(CommandLine.HelpOptionTemplate);
             app.OnExecute(
@@ -72,6 +73,14 @@ namespace NuClear.Broadway.Worker
                             commandConfig.HelpOption(CommandLine.HelpOptionTemplate);
                             commandConfig.OnExecute(() => Run(commandConfig, logger, clusterClient, cts));
                         });
+                    config.Command(
+                        CommandLine.CommandTypes.FlowKaleidoscope,
+                        commandConfig =>
+                        {
+                            commandConfig.Description = "Import objects from Kaleidoscope flow.";
+                            commandConfig.HelpOption(CommandLine.HelpOptionTemplate);
+                            commandConfig.OnExecute(() => Run(commandConfig, logger, clusterClient, cts));
+                        });
                     config.OnExecute(() =>
                     {
                         config.ShowHelp();
@@ -82,7 +91,7 @@ namespace NuClear.Broadway.Worker
             var exitCode = 0;
             try
             {
-                logger.LogInformation("VStore Worker started with options: {workerOptions}.", args.Length != 0 ? string.Join(" ", args) : "N/A");
+                logger.LogInformation("Broadway Worker started with options: {workerOptions}.", args.Length != 0 ? string.Join(" ", args) : "N/A");
                 exitCode = app.Execute(args);
             }
             catch (CommandParsingException ex)
