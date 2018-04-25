@@ -150,33 +150,28 @@ namespace NuClear.Broadway.Worker
         
         private static async Task StartClientWithRetries(
             ILogger logger, 
-            IClusterClient client,
-            int initializeAttemptsBeforeFailing = 5)
+            IClusterClient client)
         {
             var attempt = 0;
             while (true)
             {
                 try
                 {
-                    await client.Connect();
-                    logger.LogInformation("Client successfully connect to silo host");
+                    await client.Connect(async ex =>
+                    {
+                        attempt++;
+                        logger.LogWarning("Attempt {attempt} failed to initialize the Orleans client.", attempt);
+                        
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                        return true;
+                    });
+                    
+                    logger.LogInformation("Client successfully connect to silo host.");
                     break;
                 }
                 catch (Exception ex)
                 {
-                    attempt++;
-                    logger.LogWarning(
-                        ex,
-                        "Attempt {attempt} of {initializeAttemptsBeforeFailing} failed to initialize the Orleans client.",
-                        attempt,
-                        initializeAttemptsBeforeFailing);
-                    
-                    if (attempt > initializeAttemptsBeforeFailing)
-                    {
-                        return;
-                    }
-
-                    await Task.Delay(TimeSpan.FromSeconds(4));
+                    logger.LogCritical(ex, "Failed to initialize the Orleans client.");
                 }
             }
         }
