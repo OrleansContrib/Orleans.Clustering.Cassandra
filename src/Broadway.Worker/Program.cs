@@ -172,6 +172,7 @@ namespace NuClear.Broadway.Worker
                 catch (Exception ex)
                 {
                     logger.LogCritical(ex, "Failed to initialize the Orleans client.");
+                    throw;
                 }
             }
         }

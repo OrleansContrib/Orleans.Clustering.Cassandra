@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
-using NuClear.Broadway.Interfaces;
 using NuClear.Broadway.Interfaces.Workers;
 using Orleans;
 
@@ -35,7 +34,15 @@ namespace NuClear.Broadway.Worker
             if (Registry.TryGetValue(key, out var workerType))
             {
                 var getGrainMethod = GetGrainMethodInfo.MakeGenericMethod(workerType);
-                return (IWorkerGrain) getGrainMethod.Invoke(this, new object[] {key});
+                try
+                {
+                    return (IWorkerGrain) getGrainMethod.Invoke(this, new object[] {key});
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogCritical(ex, "Unexpected error occured while getting worker grain of type {workerType}.", workerType.Name);
+                    throw;
+                }
             }
             
             _logger.LogCritical("Worker for task {taskId} of type {taskType} has not beed registered.", taskId, taskType);
