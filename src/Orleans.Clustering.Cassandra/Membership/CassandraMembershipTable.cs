@@ -19,9 +19,9 @@ namespace Orleans.Clustering.Cassandra.Membership
 {
     internal class CassandraMembershipTable : IMembershipTable
     {
-        private const ConsistencyLevel ConsistencyLevel = global::Cassandra.ConsistencyLevel.EachQuorum;
+        private const ConsistencyLevel DefaultConsistencyLevel = ConsistencyLevel.EachQuorum;
 
-        private readonly string _orleansClusterId;
+        private readonly string _clusterId;
         private readonly IOptions<CassandraClusteringOptions> _cassandraClusteringOptions;
         private readonly ILogger<CassandraMembershipTable> _logger;
 
@@ -33,7 +33,7 @@ namespace Orleans.Clustering.Cassandra.Membership
             IOptions<CassandraClusteringOptions> cassandraClusteringOptions,
             ILogger<CassandraMembershipTable> logger)
         {
-            _orleansClusterId = clusterOptions.Value.ClusterId;
+            _clusterId = clusterOptions.Value.ClusterId;
             _cassandraClusteringOptions = cassandraClusteringOptions;
             _logger = logger;
         }
@@ -43,19 +43,20 @@ namespace Orleans.Clustering.Cassandra.Membership
             try
             {
                 var cassandraOptions = _cassandraClusteringOptions.Value;
-                var cluster = Cluster.Builder()
-                                     .AddContactPoints(cassandraOptions.ContactPoints)
-                                     .WithDefaultKeyspace(cassandraOptions.Keyspace)
-                                     .Build();
+                var cassandraCluster =
+                    Cluster.Builder()
+                           .AddContactPoints(cassandraOptions.ContactPoints)
+                           .WithDefaultKeyspace(cassandraOptions.Keyspace)
+                           .Build();
 
-                var session = cluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
+                var session = cassandraCluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
                     new Dictionary<string, string>
                         {
                             { "class", "SimpleStrategy" },
                             { "replication_factor", cassandraOptions.ReplicationFactor.ToString() }
                         });
 
-                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.Value.TableName));
+                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(cassandraOptions.TableName));
 
                 _dataTable = new Table<ClusterMembership>(session, mappingConfiguration);
                 await Task.Run(() => _dataTable.CreateIfNotExists());
@@ -65,13 +66,13 @@ namespace Orleans.Clustering.Cassandra.Membership
                 if (tryInitTableVersion)
                 {
                     await _mapper.InsertAsync(
-                        ClusterVersion.New(_orleansClusterId),
-                        CqlQueryOptions.New().SetConsistencyLevel(ConsistencyLevel));
+                        ClusterVersion.New(_clusterId),
+                        CqlQueryOptions.New().SetConsistencyLevel(DefaultConsistencyLevel));
                 }
             }
             catch (DriverException)
             {
-                _logger.LogWarning("Cassandra driver error occured while initializing membership data table for cluster {clusterId}.", _orleansClusterId);
+                _logger.LogWarning("Cassandra driver error occured while initializing membership data table for cluster {clusterId}.", _clusterId);
                 throw;
             }
         }
@@ -81,12 +82,12 @@ namespace Orleans.Clustering.Cassandra.Membership
             try
             {
                 var data = await _dataTable
-                                 .Where(x => x.ClusterId == _orleansClusterId)
+                                 .Where(x => x.ClusterId == _clusterId)
                                  .AllowFiltering()
-                                 .SetConsistencyLevel(ConsistencyLevel)
+                                 .SetConsistencyLevel(DefaultConsistencyLevel)
                                  .ExecuteAsync();
 
-                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(DefaultConsistencyLevel));
                 foreach (var item in data)
                 {
                     batch.Delete(item);
@@ -108,9 +109,9 @@ namespace Orleans.Clustering.Cassandra.Membership
                 var entityId = key.AsSiloInstanceId();
                 var ids = new[] { entityId, ClusterVersion.Id };
                 var data = await _dataTable
-                                 .Where(x => x.ClusterId == _orleansClusterId && ids.Contains(x.EntityId))
+                                 .Where(x => x.ClusterId == _clusterId && ids.Contains(x.EntityId))
                                  .AllowFiltering()
-                                 .SetConsistencyLevel(ConsistencyLevel)
+                                 .SetConsistencyLevel(DefaultConsistencyLevel)
                                  .ExecuteAsync();
 
                 return CreateMembershipTableData(data);
@@ -127,9 +128,9 @@ namespace Orleans.Clustering.Cassandra.Membership
             try
             {
                 var data = await _dataTable
-                                 .Where(x => x.ClusterId == _orleansClusterId)
+                                 .Where(x => x.ClusterId == _clusterId)
                                  .AllowFiltering()
-                                 .SetConsistencyLevel(ConsistencyLevel)
+                                 .SetConsistencyLevel(DefaultConsistencyLevel)
                                  .ExecuteAsync();
 
                 return CreateMembershipTableData(data);
@@ -145,10 +146,10 @@ namespace Orleans.Clustering.Cassandra.Membership
         {
             try
             {
-                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
-                var clusterVersion = tableVersion.AsClusterVersion(_orleansClusterId);
+                var siloInstance = entry.AsSiloInstance(_clusterId);
+                var clusterVersion = tableVersion.AsClusterVersion(_clusterId);
 
-                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(DefaultConsistencyLevel));
                 batch.Insert(siloInstance);
                 batch.Update(clusterVersion);
 
@@ -170,10 +171,10 @@ namespace Orleans.Clustering.Cassandra.Membership
         {
             try
             {
-                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
-                var clusterVersion = tableVersion.AsClusterVersion(_orleansClusterId);
+                var siloInstance = entry.AsSiloInstance(_clusterId);
+                var clusterVersion = tableVersion.AsClusterVersion(_clusterId);
 
-                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(DefaultConsistencyLevel));
                 batch.Update(siloInstance);
                 batch.Update(clusterVersion);
 
@@ -195,8 +196,15 @@ namespace Orleans.Clustering.Cassandra.Membership
         {
             try
             {
-                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
-                await _mapper.UpdateAsync(siloInstance, CqlQueryOptions.New().SetConsistencyLevel(ConsistencyLevel));
+                var entityId = entry.SiloAddress.AsSiloInstanceId();
+                await _mapper.UpdateAsync<SiloInstance>(
+                    Cql.New(
+                           $"SET {nameof(SiloInstance.IAmAliveTime)} = ? " +
+                           $"WHERE {nameof(SiloInstance.ClusterId)} = ? AND {nameof(SiloInstance.EntityId)} =? ",
+                           entry.IAmAliveTime,
+                           _clusterId,
+                           entityId)
+                       .WithOptions(x => x.SetConsistencyLevel(DefaultConsistencyLevel)));
             }
             catch (DriverException)
             {
