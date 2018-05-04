@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Threading.Tasks;
 
 using Cassandra;
@@ -25,12 +24,9 @@ namespace Orleans.Clustering.Cassandra.Membership
         private readonly string _orleansClusterId;
         private readonly IOptions<CassandraClusteringOptions> _cassandraClusteringOptions;
         private readonly ILogger<CassandraMembershipTable> _logger;
-        private readonly MappingConfiguration _mappingConfiguration;
 
-        private ISession _session;
-        private Table<ClusterMembership> _queryTable;
-        private Table<SiloInstance> _siloInstanceTable;
-        private Table<ClusterVersion> _clusterVersionTable;
+        private Mapper _mapper;
+        private Table<ClusterMembership> _dataTable;
 
         public CassandraMembershipTable(
             IOptions<ClusterOptions> clusterOptions,
@@ -40,58 +36,78 @@ namespace Orleans.Clustering.Cassandra.Membership
             _orleansClusterId = clusterOptions.Value.ClusterId;
             _cassandraClusteringOptions = cassandraClusteringOptions;
             _logger = logger;
-
-            _mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.Value.TableName));
         }
 
         public async Task InitializeMembershipTable(bool tryInitTableVersion)
         {
-            var cassandraOptions = _cassandraClusteringOptions.Value;
-            var cluster = Cluster.Builder()
-                                 .AddContactPoints(cassandraOptions.ContactPoints)
-                                 .WithDefaultKeyspace(cassandraOptions.Keyspace)
-                                 .Build();
-
-            _session = cluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
-                new Dictionary<string, string>
-                    {
-                        { "class", "SimpleStrategy" },
-                        { "replication_factor", cassandraOptions.ReplicationFactor.ToString() }
-                    });
-
-            _queryTable = new Table<ClusterMembership>(_session, _mappingConfiguration);
-            await Task.Run(() => _queryTable.CreateIfNotExists());
-
-            _siloInstanceTable = new Table<SiloInstance>(_session, _mappingConfiguration);
-            _clusterVersionTable = new Table<ClusterVersion>(_session, _mappingConfiguration);
-
-            if (tryInitTableVersion)
+            try
             {
-                var insert = _clusterVersionTable.Insert(
-                    new ClusterVersion
+                var cassandraOptions = _cassandraClusteringOptions.Value;
+                var cluster = Cluster.Builder()
+                                     .AddContactPoints(cassandraOptions.ContactPoints)
+                                     .WithDefaultKeyspace(cassandraOptions.Keyspace)
+                                     .Build();
+
+                var session = cluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
+                    new Dictionary<string, string>
                         {
-                            ClusterId = _orleansClusterId,
-                            Timestamp = DateTimeOffset.UtcNow,
-                            Version = 0
+                            { "class", "SimpleStrategy" },
+                            { "replication_factor", cassandraOptions.ReplicationFactor.ToString() }
                         });
 
-                insert.SetConsistencyLevel(ConsistencyLevel);
-                await insert.ExecuteAsync();
+                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.Value.TableName));
+
+                _dataTable = new Table<ClusterMembership>(session, mappingConfiguration);
+                await Task.Run(() => _dataTable.CreateIfNotExists());
+
+                _mapper = new Mapper(session, mappingConfiguration);
+
+                if (tryInitTableVersion)
+                {
+                    await _mapper.InsertAsync(
+                        ClusterVersion.New(_orleansClusterId),
+                        CqlQueryOptions.New().SetConsistencyLevel(ConsistencyLevel));
+                }
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning("Cassandra driver error occured while initializing membership data table for cluster {clusterId}.", _orleansClusterId);
+                throw;
             }
         }
 
-        public Task DeleteMembershipTableEntries(string clusterId)
+        public async Task DeleteMembershipTableEntries(string clusterId)
         {
-            throw new NotImplementedException();
+            try
+            {
+                var data = await _dataTable
+                                 .Where(x => x.ClusterId == _orleansClusterId)
+                                 .AllowFiltering()
+                                 .SetConsistencyLevel(ConsistencyLevel)
+                                 .ExecuteAsync();
+
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                foreach (var item in data)
+                {
+                    batch.Delete(item);
+                }
+
+                await _mapper.ExecuteAsync(batch);
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning("Cassandra driver error occured while deleting membership data for cluster {clusterId}.", clusterId);
+                throw;
+            }
         }
 
         public async Task<MembershipTableData> ReadRow(SiloAddress key)
         {
             try
             {
-                var entityId = SiloInstance.ConstructEntityId(key);
+                var entityId = key.AsSiloInstanceId();
                 var ids = new[] { entityId, ClusterVersion.Id };
-                var data = await _queryTable
+                var data = await _dataTable
                                  .Where(x => x.ClusterId == _orleansClusterId && ids.Contains(x.EntityId))
                                  .AllowFiltering()
                                  .SetConsistencyLevel(ConsistencyLevel)
@@ -99,9 +115,9 @@ namespace Orleans.Clustering.Cassandra.Membership
 
                 return CreateMembershipTableData(data);
             }
-            catch (Exception ex)
+            catch (DriverException)
             {
-                _logger.LogCritical(ex, "Unexpected error occured while reading data for silo with key {siloKey}.", key.ToString());
+                _logger.LogWarning("Cassandra driver error occured while reading data for silo with key {siloKey}.", key.ToString());
                 throw;
             }
         }
@@ -110,7 +126,7 @@ namespace Orleans.Clustering.Cassandra.Membership
         {
             try
             {
-                var data = await _queryTable
+                var data = await _dataTable
                                  .Where(x => x.ClusterId == _orleansClusterId)
                                  .AllowFiltering()
                                  .SetConsistencyLevel(ConsistencyLevel)
@@ -118,50 +134,75 @@ namespace Orleans.Clustering.Cassandra.Membership
 
                 return CreateMembershipTableData(data);
             }
-            catch (Exception ex)
+            catch (DriverException)
             {
-                _logger.LogCritical(ex, "Unexpected error occured while reading all cluster membership data.");
+                _logger.LogWarning("Cassandra driver error occured while reading all cluster membership data.");
                 throw;
             }
         }
 
         public async Task<bool> InsertRow(MembershipEntry entry, TableVersion tableVersion)
         {
-            var siloInstance = SiloInstance.FromMembershipEntry(_orleansClusterId, entry);
-            var clusterVersion = ClusterVersion.FromTableVersion(_orleansClusterId, tableVersion);
+            try
+            {
+                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
+                var clusterVersion = tableVersion.AsClusterVersion(_orleansClusterId);
 
-            var mapper = new Mapper(_session, _mappingConfiguration);
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                batch.Insert(siloInstance);
+                batch.Update(clusterVersion);
 
-            var batch = mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
-            batch.Insert(siloInstance);
-            batch.Update(clusterVersion);
+                await _mapper.ExecuteAsync(batch);
 
-            await mapper.ExecuteAsync(batch);
-
-            return true;
+                return true;
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning(
+                    "Cassandra driver error occured while inserting row for silo {silo}, cluster version = {clusterVersion}.",
+                    entry.ToString(),
+                    tableVersion.Version);
+                throw;
+            }
         }
 
         public async Task<bool> UpdateRow(MembershipEntry entry, string etag, TableVersion tableVersion)
         {
-            var siloInstance = SiloInstance.FromMembershipEntry(_orleansClusterId, entry);
-            var clusterVersion = ClusterVersion.FromTableVersion(_orleansClusterId, tableVersion);
+            try
+            {
+                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
+                var clusterVersion = tableVersion.AsClusterVersion(_orleansClusterId);
 
-            var mapper = new Mapper(_session, _mappingConfiguration);
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
+                batch.Update(siloInstance);
+                batch.Update(clusterVersion);
 
-            var batch = mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(ConsistencyLevel));
-            batch.Update(siloInstance);
-            batch.Update(clusterVersion);
+                await _mapper.ExecuteAsync(batch);
 
-            await mapper.ExecuteAsync(batch);
-
-            return true;
+                return true;
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning(
+                    "Cassandra driver error occured while updating row for silo {silo}, cluster version = {clusterVersion}.",
+                    entry.ToString(),
+                    tableVersion.Version);
+                throw;
+            }
         }
 
         public async Task UpdateIAmAlive(MembershipEntry entry)
         {
-            var siloInstance = SiloInstance.FromMembershipEntry(_orleansClusterId, entry);
-            var mapper = new Mapper(_session, _mappingConfiguration);
-            await Task.Run(() => mapper.Update(siloInstance, CqlQueryOptions.New().SetConsistencyLevel(ConsistencyLevel)));
+            try
+            {
+                var siloInstance = entry.AsSiloInstance(_orleansClusterId);
+                await _mapper.UpdateAsync(siloInstance, CqlQueryOptions.New().SetConsistencyLevel(ConsistencyLevel));
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning("Cassandra driver error occured while updating liveness status for silo {silo}.", entry.ToString());
+                throw;
+            }
         }
 
         private static MembershipTableData CreateMembershipTableData(IEnumerable<ClusterMembership> data)
@@ -172,53 +213,11 @@ namespace Orleans.Clustering.Cassandra.Membership
             {
                 if (item.EntityId == ClusterVersion.Id)
                 {
-                    tableVersion = new TableVersion(item.Version, string.Empty);
+                    tableVersion = item.AsTableVersion();
                 }
                 else
                 {
-                    var entry = new MembershipEntry
-                        {
-                            SiloName = item.SiloName,
-                            HostName = item.HostName,
-                            Status = (SiloStatus)item.Status,
-                            RoleName = item.RoleName,
-                            UpdateZone = item.UpdateZone,
-                            FaultZone = item.FaultZone,
-                            StartTime = item.StartTime.UtcDateTime,
-                            IAmAliveTime = item.IAmAliveTime.UtcDateTime,
-                            SiloAddress = SiloAddress.New(new IPEndPoint(IPAddress.Parse(item.Address), item.Port), item.Generation)
-                        };
-
-                    if (item.ProxyPort.HasValue)
-                    {
-                        entry.ProxyPort = item.ProxyPort.Value;
-                    }
-
-                    var suspectingSilos = new List<SiloAddress>();
-                    var suspectingTimes = new List<DateTime>();
-
-                    foreach (var silo in item.SuspectingSilos)
-                    {
-                        suspectingSilos.Add(SiloAddress.FromParsableString(silo));
-                    }
-
-                    foreach (var time in item.SuspectingTimes)
-                    {
-                        suspectingTimes.Add(time.UtcDateTime);
-                    }
-
-                    if (suspectingSilos.Count != suspectingTimes.Count)
-                    {
-                        throw new OrleansException(
-                            $"SuspectingSilos.Length of {suspectingSilos.Count} as read from Cassandra " +
-                            $"is not equal to SuspectingTimes.Length of {suspectingTimes.Count}");
-                    }
-
-                    for (var i = 0; i < suspectingSilos.Count; i++)
-                    {
-                        entry.AddSuspector(suspectingSilos[i], suspectingTimes[i]);
-                    }
-
+                    var entry = item.AsMembershipEntry();
                     members.Add(Tuple.Create(entry, string.Empty));
                 }
             }

@@ -4,9 +4,9 @@ using Orleans.Clustering.Cassandra.Membership.Models;
 
 namespace Orleans.Clustering.Cassandra.Membership
 {
-    public class EntityMappings : Mappings
+    internal sealed class EntityMappings : Mappings
     {
-        internal EntityMappings(string tableName)
+        public EntityMappings(string tableName)
         {
             For<ClusterMembership>()
                 .TableName(tableName)
