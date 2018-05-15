@@ -22,7 +22,7 @@ namespace Orleans.Clustering.Cassandra.Membership
         private const ConsistencyLevel DefaultConsistencyLevel = ConsistencyLevel.EachQuorum;
 
         private readonly string _clusterId;
-        private readonly IOptions<CassandraClusteringOptions> _cassandraClusteringOptions;
+        private readonly CassandraClusteringOptions _cassandraClusteringOptions;
         private readonly ILogger<CassandraMembershipTable> _logger;
 
         private Mapper _mapper;
@@ -31,32 +31,40 @@ namespace Orleans.Clustering.Cassandra.Membership
         public CassandraMembershipTable(
             IOptions<ClusterOptions> clusterOptions,
             IOptions<CassandraClusteringOptions> cassandraClusteringOptions,
-            ILogger<CassandraMembershipTable> logger)
+            ILogger<CassandraMembershipTable> logger,
+            ILoggerProvider loggerProvider)
         {
             _clusterId = clusterOptions.Value.ClusterId;
-            _cassandraClusteringOptions = cassandraClusteringOptions;
+            _cassandraClusteringOptions = cassandraClusteringOptions.Value;
             _logger = logger;
+
+            Diagnostics.CassandraPerformanceCountersEnabled = _cassandraClusteringOptions.Diagnostics.PerformanceCountersEnabled;
+            Diagnostics.CassandraStackTraceIncluded = _cassandraClusteringOptions.Diagnostics.StackTraceIncluded;
+
+            if (loggerProvider != null)
+            {
+                Diagnostics.AddLoggerProvider(loggerProvider);
+            }
         }
 
         public async Task InitializeMembershipTable(bool tryInitTableVersion)
         {
             try
             {
-                var cassandraOptions = _cassandraClusteringOptions.Value;
                 var cassandraCluster =
                     Cluster.Builder()
-                           .AddContactPoints(cassandraOptions.ContactPoints)
-                           .WithDefaultKeyspace(cassandraOptions.Keyspace)
+                           .AddContactPoints(_cassandraClusteringOptions.ContactPoints)
+                           .WithDefaultKeyspace(_cassandraClusteringOptions.Keyspace)
                            .Build();
 
                 var session = cassandraCluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
                     new Dictionary<string, string>
                         {
                             { "class", "SimpleStrategy" },
-                            { "replication_factor", cassandraOptions.ReplicationFactor.ToString() }
+                            { "replication_factor", _cassandraClusteringOptions.ReplicationFactor.ToString() }
                         });
 
-                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(cassandraOptions.TableName));
+                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.TableName));
 
                 _dataTable = new Table<ClusterMembership>(session, mappingConfiguration);
                 await Task.Run(() => _dataTable.CreateIfNotExists());

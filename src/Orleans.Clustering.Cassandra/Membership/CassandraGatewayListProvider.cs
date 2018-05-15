@@ -24,7 +24,7 @@ namespace Orleans.Clustering.Cassandra.Membership
         private const ConsistencyLevel DefaultConsistencyLevel = ConsistencyLevel.EachQuorum;
 
         private readonly string _clusterId;
-        private readonly IOptions<CassandraClusteringOptions> _cassandraClusteringOptions;
+        private readonly CassandraClusteringOptions _cassandraClusteringOptions;
         private readonly ILogger<CassandraGatewayListProvider> _logger;
 
         private Table<ClusterMembership> _dataTable;
@@ -33,12 +33,21 @@ namespace Orleans.Clustering.Cassandra.Membership
             IOptions<ClusterOptions> clusterOptions,
             IOptions<GatewayOptions> gatewayOptions,
             IOptions<CassandraClusteringOptions> cassandraClusteringOptions,
-            ILogger<CassandraGatewayListProvider> logger)
+            ILogger<CassandraGatewayListProvider> logger,
+            ILoggerProvider loggerProvider)
         {
             _clusterId = clusterOptions.Value.ClusterId;
-            _cassandraClusteringOptions = cassandraClusteringOptions;
+            _cassandraClusteringOptions = cassandraClusteringOptions.Value;
             _logger = logger;
             MaxStaleness = gatewayOptions.Value.GatewayListRefreshPeriod;
+
+            Diagnostics.CassandraPerformanceCountersEnabled = _cassandraClusteringOptions.Diagnostics.PerformanceCountersEnabled;
+            Diagnostics.CassandraStackTraceIncluded = _cassandraClusteringOptions.Diagnostics.StackTraceIncluded;
+
+            if (loggerProvider != null)
+            {
+                Diagnostics.AddLoggerProvider(loggerProvider);
+            }
         }
 
         public TimeSpan MaxStaleness { get; }
@@ -48,15 +57,14 @@ namespace Orleans.Clustering.Cassandra.Membership
         {
             try
             {
-                var cassandraOptions = _cassandraClusteringOptions.Value;
                 var cassandraCluster =
                     Cluster.Builder()
-                           .AddContactPoints(cassandraOptions.ContactPoints)
-                           .WithDefaultKeyspace(cassandraOptions.Keyspace)
+                           .AddContactPoints(_cassandraClusteringOptions.ContactPoints)
+                           .WithDefaultKeyspace(_cassandraClusteringOptions.Keyspace)
                            .Build();
 
                 var session = await cassandraCluster.ConnectAsync();
-                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(cassandraOptions.TableName));
+                var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.TableName));
                 _dataTable = new Table<ClusterMembership>(session, mappingConfiguration);
             }
             catch (DriverException)

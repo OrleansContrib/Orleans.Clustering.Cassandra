@@ -1,12 +1,11 @@
 ﻿using System;
 
-using Cassandra;
-
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 using Orleans.Clustering.Cassandra.Membership;
 using Orleans.Clustering.Cassandra.Options;
+using Orleans.Configuration;
 using Orleans.Hosting;
 using Orleans.Messaging;
 
@@ -14,52 +13,56 @@ namespace Orleans.Clustering.Cassandra
 {
     public static class ClusteringExtensions
     {
-        public static ISiloHostBuilder UseCassandraClustering(
-            this ISiloHostBuilder builder,
-            Action<CassandraClusteringOptions> configureOptions,
-            ILoggerProvider loggerProvider = null)
+        public static ISiloHostBuilder UseCassandraClustering(this ISiloHostBuilder builder, Func<IConfiguration, IConfiguration> configurationProvider)
         {
             return builder.ConfigureServices(
-                services =>
-                    {
-                        if (configureOptions != null)
-                        {
-                            services.Configure(configureOptions);
-                        }
+                (context, services) => services.UseCassandraClustering(ob => ob.Bind(configurationProvider(context.Configuration))));
+        }
 
-                        services.AddSingleton<IMembershipTable, CassandraMembershipTable>();
+        public static ISiloHostBuilder UseCassandraClustering(this ISiloHostBuilder builder, Action<CassandraClusteringOptions> configureOptions)
+        {
+            return builder.ConfigureServices(services => services.UseCassandraClustering(ob => ob.Configure(configureOptions)));
+        }
 
-                        Diagnostics.CassandraPerformanceCountersEnabled = true;
-                        Diagnostics.CassandraStackTraceIncluded = true;
-                        if (loggerProvider != null)
-                        {
-                            Diagnostics.AddLoggerProvider(loggerProvider);
-                        }
-                    });
+        public static ISiloHostBuilder UseCassandraClustering(
+            this ISiloHostBuilder builder,
+            Action<OptionsBuilder<CassandraClusteringOptions>> configureOptions)
+        {
+            return builder.ConfigureServices(services => services.UseCassandraClustering(configureOptions));
+        }
+
+        public static IServiceCollection UseCassandraClustering(
+            this IServiceCollection services,
+            Action<OptionsBuilder<CassandraClusteringOptions>> configureOptions)
+        {
+            configureOptions?.Invoke(services.AddOptions<CassandraClusteringOptions>());
+            return services.AddSingleton<IMembershipTable, CassandraMembershipTable>();
+        }
+
+        public static IClientBuilder UseCassandraGatewayListProvider(this IClientBuilder builder, Func<IConfiguration, IConfiguration> configurationProvider)
+        {
+            return builder.ConfigureServices(
+                (context, services) => services.UseCassandraGatewayListProvider(ob => ob.Bind(configurationProvider(context.Configuration))));
+        }
+
+        public static IClientBuilder UseCassandraGatewayListProvider(this IClientBuilder builder, Action<CassandraClusteringOptions> configureOptions)
+        {
+            return builder.ConfigureServices(services => services.UseCassandraGatewayListProvider(ob => ob.Configure(configureOptions)));
         }
 
         public static IClientBuilder UseCassandraGatewayListProvider(
             this IClientBuilder builder,
-            Action<CassandraClusteringOptions> configureOptions,
-            ILoggerProvider loggerProvider = null)
+            Action<OptionsBuilder<CassandraClusteringOptions>> configureOptions)
         {
-            return builder.ConfigureServices(
-                services =>
-                    {
-                        if (configureOptions != null)
-                        {
-                            services.Configure(configureOptions);
-                        }
+            return builder.ConfigureServices(services => services.UseCassandraGatewayListProvider(configureOptions));
+        }
 
-                        services.AddSingleton<IGatewayListProvider, CassandraGatewayListProvider>();
-
-                        Diagnostics.CassandraPerformanceCountersEnabled = true;
-                        Diagnostics.CassandraStackTraceIncluded = true;
-                        if (loggerProvider != null)
-                        {
-                            Diagnostics.AddLoggerProvider(loggerProvider);
-                        }
-                    });
+        public static IServiceCollection UseCassandraGatewayListProvider(
+            this IServiceCollection services,
+            Action<OptionsBuilder<CassandraClusteringOptions>> configureOptions)
+        {
+            configureOptions?.Invoke(services.AddOptions<CassandraClusteringOptions>());
+            return services.AddSingleton<IGatewayListProvider, CassandraGatewayListProvider>();
         }
     }
 }
