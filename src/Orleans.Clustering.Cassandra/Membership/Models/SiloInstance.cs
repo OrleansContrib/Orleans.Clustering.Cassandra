@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Net;
-
-using Orleans.Runtime;
 
 namespace Orleans.Clustering.Cassandra.Membership.Models
 {

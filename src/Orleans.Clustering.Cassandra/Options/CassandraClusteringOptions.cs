@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace Orleans.Clustering.Cassandra.Options
+﻿namespace Orleans.Clustering.Cassandra.Options
 {
     public class CassandraClusteringOptions
     {
