@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orleans.Clustering.Cassandra", "Orleans.Clustering.Cassandra.csproj", "{715DE586-77D5-48B1-AB5F-C3FE4E2FA1FD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orleans.Clustering.Cassandra", "src/Orleans.Clustering.Cassandra/Orleans.Clustering.Cassandra.csproj", "{715DE586-77D5-48B1-AB5F-C3FE4E2FA1FD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
