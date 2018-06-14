@@ -68,8 +68,8 @@ after_build:
 deploy:
     # MyGet Deployment for builds & releases
   - provider: NuGet
-    server: https://www.myget.org/F/orleans-clustering-cassandra/api/v2/package
-    symbol_server: https://www.myget.org/F/orleans-clustering-cassandra/symbols/api/v2/package
+    server: https://www.myget.org/F/orleans-cassandra/api/v2/package
+    symbol_server: https://www.myget.org/F/orleans-cassandra/symbols/api/v2/package
     api_key:
       secure: oS9xcmuI1FbfAD8D2GGqI3XNFep6/ZcM7KCA9coG27SgnfnYyg8lx4VCfCfQ1Omb
     artifact: /.*\.nupkg/
