@@ -54,7 +54,6 @@ namespace Orleans.Clustering.Cassandra.Membership
                 var cassandraCluster =
                     Cluster.Builder()
                            .AddContactPoints(_cassandraClusteringOptions.ContactPoints.Split(','))
-                           .WithDefaultKeyspace(_cassandraClusteringOptions.Keyspace)
                            .Build();
 
                 var session = await cassandraCluster.ConnectAsync();
