@@ -57,11 +57,20 @@ namespace Orleans.Clustering.Cassandra.Membership
                            .WithDefaultKeyspace(_cassandraClusteringOptions.Keyspace)
                            .Build();
 
-                var session = cassandraCluster.ConnectAndCreateDefaultKeyspaceIfNotExists(
-                    new Dictionary<string, string>
+                var session = await cassandraCluster.ConnectAsync();
+                await Task.Run(
+                    () =>
                         {
-                            { "class", "SimpleStrategy" },
-                            { "replication_factor", _cassandraClusteringOptions.ReplicationFactor.ToString() }
+                            var keyspace = _cassandraClusteringOptions.Keyspace;
+                            session.CreateKeyspaceIfNotExists(
+                                keyspace,
+                                new Dictionary<string, string>
+                                    {
+                                        { "class", "SimpleStrategy" },
+                                        { "replication_factor", _cassandraClusteringOptions.ReplicationFactor.ToString() }
+                                    });
+
+                            session.ChangeKeyspace(keyspace);
                         });
 
                 var mappingConfiguration = new MappingConfiguration().Define(new EntityMappings(_cassandraClusteringOptions.TableName));
