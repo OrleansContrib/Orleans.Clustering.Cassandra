@@ -118,6 +118,31 @@ namespace Orleans.Clustering.Cassandra.Membership
             }
         }
 
+        public async Task CleanupDefunctSiloEntries(DateTimeOffset beforeDate)
+        {
+            try
+            {
+                var data = await _dataTable
+                                 .Where(x => x.ClusterId == _clusterId && x.Timestamp < beforeDate && x.Status == (int)SiloStatus.Dead)
+                                 .AllowFiltering()
+                                 .SetConsistencyLevel(DefaultConsistencyLevel)
+                                 .ExecuteAsync();
+
+                var batch = _mapper.CreateBatch().WithOptions(x => x.SetConsistencyLevel(DefaultConsistencyLevel));
+                foreach (var item in data)
+                {
+                    batch.Delete(item);
+                }
+
+                await _mapper.ExecuteAsync(batch);
+            }
+            catch (DriverException)
+            {
+                _logger.LogWarning("Cassandra driver error occured while cleaning up defunct Silo entries for cluster {clusterId}.", _clusterId);
+                throw;
+            }
+        }
+
         public async Task<MembershipTableData> ReadRow(SiloAddress key)
         {
             try
