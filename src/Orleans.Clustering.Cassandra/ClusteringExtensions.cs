@@ -8,6 +8,7 @@ using Orleans.Clustering.Cassandra.Options;
 using Orleans.Configuration;
 using Orleans.Hosting;
 using Orleans.Messaging;
+using Microsoft.Extensions.Options;
 
 namespace Orleans.Clustering.Cassandra
 {
