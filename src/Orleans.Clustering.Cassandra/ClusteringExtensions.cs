@@ -2,10 +2,10 @@
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 using Orleans.Clustering.Cassandra.Membership;
 using Orleans.Clustering.Cassandra.Options;
-using Orleans.Configuration;
 using Orleans.Hosting;
 using Orleans.Messaging;
 using Microsoft.Extensions.Options;
